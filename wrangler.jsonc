@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "claude-sessions",
-      "database_id": "YOUR_DATABASE_ID_HERE"
+      "database_id": "98d0e680-8abe-4ce3-a941-70cb391adbf8"
     }
   ]
 }
