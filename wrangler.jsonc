@@ -1,0 +1,14 @@
+{
+  "name": "claude-sessions",
+  "main": "src/index.js",
+  "compatibility_date": "2024-12-01",
+  // After creating your D1 database, replace the database_id below with your own.
+  // Run: npx wrangler d1 create claude-sessions
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "claude-sessions",
+      "database_id": "YOUR_DATABASE_ID_HERE"
+    }
+  ]
+}
