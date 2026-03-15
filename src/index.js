@@ -109,6 +109,14 @@ export default {
       return json(result);
     }
 
+    // GET /projects — list distinct project names
+    if (request.method === 'GET' && url.pathname === '/projects') {
+      const result = await env.DB.prepare(
+        "SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL AND project != '' ORDER BY project"
+      ).all();
+      return json(result.results.map(r => r.project));
+    }
+
     // GET /stats — aggregate stats (cap durations at < 1440 to exclude outliers)
     if (request.method === 'GET' && url.pathname === '/stats') {
       const result = await env.DB.prepare(`
@@ -152,6 +160,39 @@ export default {
         ok: true,
         fixed_with_duration: withDuration.meta?.changes || 0,
         fixed_without_duration: withoutDuration.meta?.changes || 0
+      });
+    }
+
+    // POST /fix-projects — backfill clean project names from messy paths
+    if (request.method === 'POST' && url.pathname === '/fix-projects') {
+      // Fix paths like "Khangtsen//claude/worktrees/..." → "Khangtsen"
+      const worktreeResult = await env.DB.prepare(`
+        UPDATE sessions
+        SET project = SUBSTR(project, 1, INSTR(project, '/') - 1)
+        WHERE project LIKE '%/%'
+          AND project NOT LIKE '%CodingProjects%'
+          AND LENGTH(SUBSTR(project, 1, INSTR(project, '/') - 1)) > 0
+      `).run();
+
+      // Fix paths still containing CodingProjects
+      const codingResult = await env.DB.prepare(`
+        UPDATE sessions
+        SET project = SUBSTR(
+          project,
+          INSTR(project, 'CodingProjects/') + 15,
+          CASE
+            WHEN INSTR(SUBSTR(project, INSTR(project, 'CodingProjects/') + 15), '/') > 0
+            THEN INSTR(SUBSTR(project, INSTR(project, 'CodingProjects/') + 15), '/') - 1
+            ELSE LENGTH(SUBSTR(project, INSTR(project, 'CodingProjects/') + 15))
+          END
+        )
+        WHERE project LIKE '%CodingProjects/%'
+      `).run();
+
+      return json({
+        ok: true,
+        worktree_fixed: worktreeResult.meta?.changes || 0,
+        coding_fixed: codingResult.meta?.changes || 0
       });
     }
 
@@ -219,6 +260,7 @@ function UI_HTML(origin) {
       margin-bottom: 1.5rem;
       flex-wrap: wrap;
     }
+    .filter-bar select,
     .filter-bar input[type="text"],
     .filter-bar input[type="date"] {
       font-family: 'DM Sans', sans-serif;
@@ -462,6 +504,9 @@ function UI_HTML(origin) {
       <div class="stat-card"><div class="label">Avg Duration</div><div class="value" id="stat-avg">--</div></div>
     </div>
     <div class="filter-bar">
+      <select id="project-filter" style="min-width:130px;">
+        <option value="">All projects</option>
+      </select>
       <input type="text" id="search-input" placeholder="Search sessions..." />
       <input type="date" id="date-from" title="From date" />
       <input type="date" id="date-to" title="To date" />
@@ -512,13 +557,28 @@ function UI_HTML(origin) {
       } catch (e) { console.error('Stats error:', e); }
     }
 
+    async function loadProjects() {
+      try {
+        var projects = await api('/projects');
+        var sel = document.getElementById('project-filter');
+        projects.forEach(function(p) {
+          var opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          sel.appendChild(opt);
+        });
+      } catch (e) { console.error('Projects error:', e); }
+    }
+
     function buildQuery() {
       const params = new URLSearchParams();
       params.set('limit', LIMIT);
       params.set('offset', currentOffset);
+      const project = document.getElementById('project-filter').value;
       const search = document.getElementById('search-input').value.trim();
       const from = document.getElementById('date-from').value;
       const to = document.getElementById('date-to').value;
+      if (project) params.set('project', project);
       if (search) params.set('search', search);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
@@ -711,7 +771,7 @@ function UI_HTML(origin) {
 
     var urlParams = new URLSearchParams(window.location.search);
     var singleSessionId = urlParams.get('session');
-    if (singleSessionId) { showFullSessionView(singleSessionId); } else { loadStats(); loadSessions(); }
+    if (singleSessionId) { showFullSessionView(singleSessionId); } else { loadStats(); loadProjects(); loadSessions(); }
   </script>
 </body>
 </html>`;
